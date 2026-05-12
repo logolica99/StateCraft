@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0e18">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>US Map Learner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e18;
+  --bg-elev: #131a2a;
+  --bg-elev-2: #1c2438;
+  --gold: #f5c842;
+  --gold-dim: #b08b1e;
+  --text: #e7eaf2;
+  --text-dim: #8e95a8;
+  --text-faint: #5e667c;
+  --blue: #4d8df0;
+  --blue-dim: #2a4a85;
+  --green: #4ad48c;
+  --green-dim: #1f5c3e;
+  --gray: #2d3447;
+  --gray-2: #3b425a;
+  --red: #e85a5a;
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  height: 100%; width: 100%; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none; touch-action: none;
+}
+body { user-select: none; -webkit-user-select: none; }
+.app {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  padding-top: var(--sat); padding-left: var(--sal); padding-right: var(--sar);
+}
+header {
+  position: relative; z-index: 5;
+  padding: 14px 18px 10px;
+  background: linear-gradient(180deg, rgba(10,14,24,0.96) 0%, rgba(10,14,24,0.85) 70%, rgba(10,14,24,0) 100%);
+}
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+h1 {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700; font-size: 22px; letter-spacing: 0.2px;
+  color: var(--gold);
+}
+.quiz-btn {
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--gray-2);
+  padding: 8px 14px; border-radius: 999px;
+  font: 600 13px 'DM Sans', sans-serif;
+  cursor: pointer; transition: all .18s;
+  white-space: nowrap;
+}
+.quiz-btn.active { background: var(--gold); color: #0a0e18; border-color: var(--gold); }
+.quiz-btn:active { transform: scale(.96); }
+.progress-wrap { margin-top: 10px; }
+.progress-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11px; color: var(--text-dim); margin-bottom: 6px;
+  letter-spacing: 0.5px; text-transform: uppercase;
+}
+.progress-label .count { color: var(--text); font-weight: 600; font-size: 12px; }
+.progress-bar {
+  height: 4px; width: 100%; background: var(--gray);
+  border-radius: 999px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: linear-gradient(90deg, var(--blue) 0%, var(--green) 100%);
+  border-radius: 999px; transition: width .4s cubic-bezier(.4,.0,.2,1);
+}
+.map-wrap {
+  flex: 1; position: relative; overflow: hidden;
+  background: var(--bg);
+}
+#map-svg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  touch-action: none;
+}
+#map-svg path.state {
+  fill: var(--gray); stroke: var(--bg); stroke-width: 0.6;
+  transition: fill .25s ease;
+  cursor: pointer;
+}
+#map-svg path.state.known { fill: var(--blue); }
+#map-svg path.state.learned { fill: var(--green); }
+#map-svg path.state.flash-correct { fill: var(--green) !important; }
+#map-svg path.state.flash-wrong { fill: var(--red) !important; }
+#map-svg text.state-label {
+  fill: rgba(255,255,255,0.85);
+  font: 600 9px 'DM Sans', sans-serif;
+  text-anchor: middle; dominant-baseline: middle;
+  pointer-events: none;
+  paint-order: stroke; stroke: rgba(0,0,0,0.5); stroke-width: 1.2px;
+}
+#map-svg text.state-label.on-known,
+#map-svg text.state-label.on-learned {
+  fill: rgba(10,14,24,0.92); stroke: rgba(255,255,255,0.2);
+}
+.app.quiz #map-svg text.state-label { display: none; }
+#map-svg path.state.dim { opacity: .4; }
+
+/* bottom sheet */
+.sheet-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0); pointer-events: none;
+  transition: background .25s;
+  z-index: 8;
+}
+.sheet-backdrop.open { background: rgba(0,0,0,0.35); pointer-events: auto; }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: var(--bg-elev);
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+  transform: translateY(100%);
+  transition: transform .3s cubic-bezier(.32,.72,0,1);
+  z-index: 10;
+  padding-bottom: calc(20px + var(--sab));
+  max-height: 80%;
+  display: flex; flex-direction: column;
+  touch-action: none;
+}
+.sheet.open { transform: translateY(0); }
+.sheet.dragging { transition: none; }
+.sheet-handle {
+  width: 44px; height: 5px; background: var(--gray-2);
+  border-radius: 999px; margin: 10px auto 8px;
+  flex-shrink: 0;
+}
+.sheet-grab { padding: 4px 0 8px; cursor: grab; flex-shrink: 0; }
+.sheet-content { padding: 6px 22px 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.sheet-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.sheet-name {
+  font-family: 'Playfair Display', serif; font-weight: 700;
+  font-size: 28px; color: var(--text); line-height: 1.1;
+}
+.sheet-abbr {
+  font: 700 13px 'DM Sans', sans-serif;
+  color: var(--gold); letter-spacing: 2px;
+  background: rgba(245,200,66,0.1); padding: 3px 9px;
+  border-radius: 6px;
+}
+.sheet-region {
+  font-size: 13px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 1.5px; margin-bottom: 16px;
+}
+.stat-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px;
+}
+.stat {
+  background: var(--bg-elev-2); border-radius: 12px; padding: 11px 13px;
+}
+.stat-label {
+  font-size: 10px; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 4px;
+}
+.stat-val { font: 600 15px 'DM Sans', sans-serif; color: var(--text); }
+.facts-title {
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 1.2px; margin-bottom: 10px;
+}
+.facts { margin-bottom: 18px; }
+.fact {
+  display: flex; gap: 12px; padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 14px; line-height: 1.45; color: var(--text);
+}
+.fact:first-child { border-top: none; padding-top: 4px; }
+.fact-dot {
+  flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); margin-top: 8px;
+}
+.neighbors-title {
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 1.2px; margin-bottom: 10px;
+}
+.neighbors {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px;
+}
+.neighbor-chip {
+  background: var(--bg-elev-2); border: 1px solid var(--gray-2);
+  color: var(--text); font: 600 12px 'DM Sans', sans-serif;
+  padding: 7px 11px; border-radius: 999px; cursor: pointer;
+  transition: all .15s;
+}
+.neighbor-chip:active { transform: scale(.95); }
+.neighbor-chip.known { background: rgba(77,141,240,0.15); border-color: rgba(77,141,240,0.4); color: var(--blue); }
+.neighbor-chip.learned { background: rgba(74,212,140,0.12); border-color: rgba(74,212,140,0.4); color: var(--green); }
+.learn-btn {
+  width: 100%; padding: 14px;
+  background: var(--gold); color: #0a0e18;
+  border: none; border-radius: 12px;
+  font: 700 15px 'DM Sans', sans-serif; letter-spacing: 0.3px;
+  cursor: pointer; margin-bottom: 6px;
+}
+.learn-btn:active { transform: scale(.98); }
+.learn-btn.is-learned {
+  background: var(--bg-elev-2); color: var(--text-dim);
+  border: 1px solid var(--gray-2);
+}
+
+/* quiz overlay */
+.quiz-card {
+  position: absolute; left: 50%; bottom: calc(28px + var(--sab));
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--gray-2); border-radius: 16px;
+  padding: 16px 18px; min-width: 280px; max-width: calc(100% - 32px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s, transform .25s;
+  z-index: 6; text-align: center;
+}
+.quiz-card.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.quiz-prompt {
+  font-size: 13px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 1.5px; margin-bottom: 8px;
+}
+.quiz-target {
+  font-family: 'Playfair Display', serif; font-weight: 700;
+  font-size: 26px; color: var(--gold); line-height: 1.1; margin-bottom: 12px;
+}
+.quiz-actions { display: flex; gap: 8px; justify-content: center; }
+.quiz-action {
+  background: var(--bg-elev-2); color: var(--text);
+  border: 1px solid var(--gray-2);
+  padding: 8px 14px; border-radius: 999px;
+  font: 600 12px 'DM Sans', sans-serif; cursor: pointer;
+}
+.quiz-action:active { transform: scale(.95); }
+.quiz-status {
+  font-size: 12px; color: var(--text-dim); margin-top: 10px;
+  min-height: 16px;
+}
+.quiz-status.correct { color: var(--green); }
+.quiz-status.wrong { color: var(--red); }
+.quiz-summary {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px; color: var(--gold);
+}
+
+.toast {
+  position: absolute; top: calc(80px + var(--sat)); left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--gray-2);
+  padding: 10px 16px; border-radius: 999px;
+  font: 600 13px 'DM Sans', sans-serif;
+  opacity: 0; transition: opacity .25s, transform .25s;
+  z-index: 20; pointer-events: none;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { border-color: rgba(74,212,140,0.5); color: var(--green); }
+.toast.error { border-color: rgba(232,90,90,0.5); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <div class="title-row">
+      <h1>States</h1>
+      <button class="quiz-btn" id="quiz-toggle">Quiz</button>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span>Progress</span>
+        <span class="count"><span id="learned-count">0</span> / 50</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+    </div>
+  </header>
+
+  <div class="map-wrap" id="map-wrap">
+    <svg id="map-svg" viewBox="0 0 975 610" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="sheet-backdrop" id="sheet-backdrop"></div>
+    <div class="sheet" id="sheet">
+      <div class="sheet-grab" id="sheet-grab">
+        <div class="sheet-handle"></div>
+      </div>
+      <div class="sheet-content" id="sheet-content"></div>
+    </div>
+    <div class="quiz-card" id="quiz-card">
+      <div class="quiz-prompt">Find</div>
+      <div class="quiz-target" id="quiz-target">—</div>
+      <div class="quiz-actions">
+        <button class="quiz-action" id="quiz-show">Show me</button>
+        <button class="quiz-action" id="quiz-skip">Skip</button>
+      </div>
+      <div class="quiz-status" id="quiz-status"></div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<script id="geo-data" type="application/json">__GEO_DATA__</script>
+<script id="state-data" type="application/json">__STATE_DATA__</script>
+<script>
+(() => {
+  const GEO = JSON.parse(document.getElementById('geo-data').textContent);
+  const STATES = JSON.parse(document.getElementById('state-data').textContent);
+  const PREMARK = ['CA','NY','TX','FL'];
+
+  const svg = document.getElementById('map-svg');
+  const NS = 'http://www.w3.org/2000/svg';
+
+  const status = {}; // code -> 'known' | 'learned' | undefined
+  PREMARK.forEach(c => { status[c] = 'known'; });
+
+  // Build SVG
+  const pathEls = {};
+  const labelEls = {};
+  const codes = Object.keys(GEO.paths);
+  for (const code of codes) {
+    const g = GEO.paths[code];
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', g.d);
+    p.setAttribute('class', 'state');
+    p.dataset.code = code;
+    svg.appendChild(p);
+    pathEls[code] = p;
+  }
+  for (const code of codes) {
+    const c = GEO.centroids[code];
+    if (!c) continue;
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', c[0]);
+    t.setAttribute('y', c[1]);
+    t.setAttribute('class', 'state-label');
+    t.textContent = code;
+    svg.appendChild(t);
+    labelEls[code] = t;
+  }
+
+  function refreshState(code) {
+    const p = pathEls[code]; if (!p) return;
+    p.classList.remove('known', 'learned', 'flash-correct', 'flash-wrong');
+    const s = status[code];
+    if (s === 'known') p.classList.add('known');
+    else if (s === 'learned') p.classList.add('learned');
+    const t = labelEls[code];
+    if (t) {
+      t.classList.remove('on-known', 'on-learned');
+      if (s === 'known') t.classList.add('on-known');
+      else if (s === 'learned') t.classList.add('on-learned');
+    }
+  }
+  codes.forEach(refreshState);
+
+  function progressUpdate() {
+    const learned = codes.filter(c => status[c] === 'known' || status[c] === 'learned').length;
+    document.getElementById('learned-count').textContent = learned;
+    document.getElementById('progress-fill').style.width = (learned / 50 * 100) + '%';
+  }
+  progressUpdate();
+
+  // Pan / zoom
+  const mapWrap = document.getElementById('map-wrap');
+  let view = { x: 0, y: 0, k: 1 };
+  function applyView() {
+    svg.style.transformOrigin = '0 0';
+    svg.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+  }
+  applyView();
+
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function clampView() {
+    view.k = clamp(view.k, 0.85, 8);
+    const rect = mapWrap.getBoundingClientRect();
+    const maxPan = 200; // allow some over-pan
+    const w = rect.width * view.k;
+    const h = rect.height * view.k;
+    view.x = clamp(view.x, rect.width - w - maxPan, maxPan);
+    view.y = clamp(view.y, rect.height - h - maxPan, maxPan);
+  }
+
+  // Pointer-based pan / pinch
+  const pointers = new Map();
+  let lastTap = 0;
+  let pinchStart = null;
+  let panStart = null;
+  let didMove = false;
+  let downCode = null;
+
+  function pointerPos(e) {
+    const r = mapWrap.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  mapWrap.addEventListener('pointerdown', (e) => {
+    mapWrap.setPointerCapture(e.pointerId);
+    const p = pointerPos(e);
+    pointers.set(e.pointerId, p);
+    didMove = false;
+    if (pointers.size === 1) {
+      panStart = { vx: view.x, vy: view.y, px: p.x, py: p.y };
+      const target = e.target.closest('path.state');
+      downCode = target ? target.dataset.code : null;
+    } else if (pointers.size === 2) {
+      const pts = [...pointers.values()];
+      pinchStart = {
+        d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+        cx: (pts[0].x + pts[1].x) / 2,
+        cy: (pts[0].y + pts[1].y) / 2,
+        k: view.k, vx: view.x, vy: view.y,
+      };
+      panStart = null;
+      downCode = null;
+    }
+  });
+
+  mapWrap.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    const p = pointerPos(e);
+    pointers.set(e.pointerId, p);
+    if (pointers.size === 2 && pinchStart) {
+      const pts = [...pointers.values()];
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const cx = (pts[0].x + pts[1].x) / 2;
+      const cy = (pts[0].y + pts[1].y) / 2;
+      const k = clamp(pinchStart.k * (d / pinchStart.d), 0.85, 8);
+      // zoom toward midpoint
+      view.k = k;
+      view.x = cx - (pinchStart.cx - pinchStart.vx) * (k / pinchStart.k);
+      view.y = cy - (pinchStart.cy - pinchStart.vy) * (k / pinchStart.k);
+      clampView();
+      applyView();
+      didMove = true;
+    } else if (pointers.size === 1 && panStart) {
+      const dx = p.x - panStart.px;
+      const dy = p.y - panStart.py;
+      if (Math.hypot(dx, dy) > 4) didMove = true;
+      view.x = panStart.vx + dx;
+      view.y = panStart.vy + dy;
+      clampView();
+      applyView();
+    }
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStart = null;
+    if (pointers.size === 0) {
+      if (!didMove && downCode) {
+        handleStateTap(downCode);
+      }
+      panStart = null;
+      downCode = null;
+    } else if (pointers.size === 1) {
+      const remaining = [...pointers.entries()][0];
+      panStart = { vx: view.x, vy: view.y, px: remaining[1].x, py: remaining[1].y };
+    }
+  }
+  mapWrap.addEventListener('pointerup', endPointer);
+  mapWrap.addEventListener('pointercancel', endPointer);
+
+  // Wheel zoom for desktop
+  mapWrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const p = pointerPos(e);
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    const newK = clamp(view.k * factor, 0.85, 8);
+    const ratio = newK / view.k;
+    view.x = p.x - (p.x - view.x) * ratio;
+    view.y = p.y - (p.y - view.y) * ratio;
+    view.k = newK;
+    clampView();
+    applyView();
+  }, { passive: false });
+
+  // Double-tap to reset
+  mapWrap.addEventListener('pointerdown', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 300 && pointers.size === 1) {
+      view = { x: 0, y: 0, k: 1 };
+      applyView();
+    }
+    lastTap = now;
+  }, true);
+
+  // Quiz mode state
+  let quizMode = false;
+  let quizTarget = null;
+  let quizAttempts = 0;
+  let quizCompleted = new Set();
+  let quizScore = { correct: 0, total: 0 };
+
+  function pickQuizTarget() {
+    const pool = codes.filter(c => !quizCompleted.has(c));
+    if (pool.length === 0) {
+      quizTarget = null;
+      document.getElementById('quiz-target').textContent = `Done! ${quizScore.correct} / ${quizScore.total}`;
+      document.getElementById('quiz-target').classList.add('quiz-summary');
+      document.getElementById('quiz-status').textContent = 'Tap Quiz again to reset';
+      return;
+    }
+    quizTarget = pool[Math.floor(Math.random() * pool.length)];
+    quizAttempts = 0;
+    document.getElementById('quiz-target').textContent = STATES[quizTarget].name;
+    document.getElementById('quiz-target').classList.remove('quiz-summary');
+    document.getElementById('quiz-status').textContent = '';
+    document.getElementById('quiz-status').className = 'quiz-status';
+  }
+
+  function setQuizMode(on) {
+    quizMode = on;
+    document.getElementById('app').classList.toggle('quiz', on);
+    document.getElementById('quiz-toggle').classList.toggle('active', on);
+    document.getElementById('quiz-toggle').textContent = on ? 'Exit' : 'Quiz';
+    document.getElementById('quiz-card').classList.toggle('show', on);
+    if (on) {
+      closeSheet();
+      quizCompleted = new Set();
+      quizScore = { correct: 0, total: 0 };
+      pickQuizTarget();
+    }
+  }
+
+  document.getElementById('quiz-toggle').addEventListener('click', () => setQuizMode(!quizMode));
+  document.getElementById('quiz-skip').addEventListener('click', () => {
+    if (!quizTarget) { pickQuizTarget(); return; }
+    quizCompleted.add(quizTarget);
+    quizScore.total++;
+    pickQuizTarget();
+  });
+  document.getElementById('quiz-show').addEventListener('click', () => {
+    if (!quizTarget) return;
+    const target = pathEls[quizTarget];
+    target.classList.add('flash-correct');
+    setTimeout(() => target.classList.remove('flash-correct'), 800);
+    document.getElementById('quiz-status').textContent = `It's ${STATES[quizTarget].name}`;
+    document.getElementById('quiz-status').className = 'quiz-status';
+    quizCompleted.add(quizTarget);
+    quizScore.total++;
+    setTimeout(pickQuizTarget, 1200);
+  });
+
+  // State tap handling
+  function handleStateTap(code) {
+    if (quizMode) {
+      if (!quizTarget) return;
+      if (code === quizTarget) {
+        const target = pathEls[code];
+        target.classList.add('flash-correct');
+        setTimeout(() => target.classList.remove('flash-correct'), 700);
+        document.getElementById('quiz-status').textContent = 'Correct!';
+        document.getElementById('quiz-status').className = 'quiz-status correct';
+        quizCompleted.add(code);
+        quizScore.total++;
+        quizScore.correct++;
+        if (status[code] !== 'known') status[code] = 'learned';
+        refreshState(code);
+        progressUpdate();
+        setTimeout(pickQuizTarget, 900);
+      } else {
+        const target = pathEls[code];
+        target.classList.add('flash-wrong');
+        setTimeout(() => target.classList.remove('flash-wrong'), 500);
+        quizAttempts++;
+        document.getElementById('quiz-status').textContent = `Not ${STATES[code] ? STATES[code].name : ''} — try again`;
+        document.getElementById('quiz-status').className = 'quiz-status wrong';
+      }
+    } else {
+      openSheet(code);
+    }
+  }
+
+  // Bottom sheet
+  const sheet = document.getElementById('sheet');
+  const sheetBackdrop = document.getElementById('sheet-backdrop');
+  const sheetContent = document.getElementById('sheet-content');
+  let sheetOpen = false;
+  let sheetState = null;
+
+  function fmtPop(n) {
+    if (n >= 1e6) return (n/1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.?0+$/, '') + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(0) + 'K';
+    return n.toString();
+  }
+
+  function renderSheet(code) {
+    const s = STATES[code]; if (!s) return;
+    const learned = status[code] === 'known' || status[code] === 'learned';
+    const factsHtml = s.facts.map(f => `<div class="fact"><div class="fact-dot"></div><div>${f}</div></div>`).join('');
+    const neighborsHtml = (s.neighbors || []).map(n => {
+      const cls = status[n] === 'known' ? 'known' : (status[n] === 'learned' ? 'learned' : '');
+      return `<button class="neighbor-chip ${cls}" data-neighbor="${n}">${n}</button>`;
+    }).join('') || '<div style="font-size:13px;color:var(--text-faint)">No neighboring states</div>';
+
+    sheetContent.innerHTML = `
+      <div class="sheet-head">
+        <div class="sheet-name">${s.name}</div>
+        <div class="sheet-abbr">${code}</div>
+      </div>
+      <div class="sheet-region">${s.region} &middot; Capital: ${s.capital}</div>
+      <div class="stat-row">
+        <div class="stat"><div class="stat-label">Capital</div><div class="stat-val">${s.capital}</div></div>
+        <div class="stat"><div class="stat-label">Population</div><div class="stat-val">${fmtPop(s.pop)}</div></div>
+      </div>
+      <div class="facts-title">Memorable facts</div>
+      <div class="facts">${factsHtml}</div>
+      <div class="neighbors-title">Neighboring states</div>
+      <div class="neighbors">${neighborsHtml}</div>
+      <button class="learn-btn ${learned ? 'is-learned' : ''}" id="learn-btn">
+        ${learned ? '✓ Marked as learned' : 'Mark as learned'}
+      </button>
+    `;
+    document.getElementById('learn-btn').addEventListener('click', () => {
+      if (status[code] === 'known') {
+        showToast('Already in your "known" set', 'success');
+        return;
+      }
+      if (status[code] === 'learned') {
+        delete status[code];
+      } else {
+        status[code] = 'learned';
+        showToast(`${s.name} marked as learned`, 'success');
+      }
+      refreshState(code);
+      progressUpdate();
+      renderSheet(code);
+    });
+    sheetContent.querySelectorAll('[data-neighbor]').forEach(btn => {
+      btn.addEventListener('click', () => openSheet(btn.dataset.neighbor));
+    });
+  }
+
+  function openSheet(code) {
+    sheetState = code;
+    renderSheet(code);
+    sheet.classList.add('open');
+    sheetBackdrop.classList.add('open');
+    sheetOpen = true;
+    sheet.style.transform = '';
+  }
+  function closeSheet() {
+    sheet.classList.remove('open');
+    sheetBackdrop.classList.remove('open');
+    sheetOpen = false;
+    sheet.style.transform = '';
+  }
+  sheetBackdrop.addEventListener('click', closeSheet);
+
+  // Sheet drag-to-dismiss
+  const sheetGrab = document.getElementById('sheet-grab');
+  let dragStart = null;
+  function sheetDragStart(e) {
+    if (!sheetOpen) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    dragStart = { y, h: sheet.getBoundingClientRect().height };
+    sheet.classList.add('dragging');
+  }
+  function sheetDragMove(e) {
+    if (!dragStart) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    const dy = Math.max(0, y - dragStart.y);
+    sheet.style.transform = `translateY(${dy}px)`;
+  }
+  function sheetDragEnd(e) {
+    if (!dragStart) return;
+    const y = (e.changedTouches ? e.changedTouches[0].clientY : e.clientY);
+    const dy = y - dragStart.y;
+    sheet.classList.remove('dragging');
+    if (dy > dragStart.h * 0.25) {
+      closeSheet();
+    } else {
+      sheet.style.transform = '';
+    }
+    dragStart = null;
+  }
+  sheetGrab.addEventListener('pointerdown', sheetDragStart);
+  window.addEventListener('pointermove', sheetDragMove);
+  window.addEventListener('pointerup', sheetDragEnd);
+  window.addEventListener('pointercancel', sheetDragEnd);
+
+  // Toast
+  let toastTimer = null;
+  function showToast(msg, kind) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + (kind || '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.classList.remove('show'); }, 1800);
+  }
+
+  // Prevent native double-tap zoom on iOS
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
