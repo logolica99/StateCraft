@@ -143,7 +143,10 @@ h1 {
   flex-shrink: 0;
 }
 .sheet-grab { padding: 4px 0 8px; cursor: grab; flex-shrink: 0; }
-.sheet-content { padding: 6px 22px 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.sheet-content {
+  padding: 6px 22px 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
 .sheet-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .sheet-name {
   font-family: 'Playfair Display', serif; font-weight: 700;
@@ -207,6 +210,7 @@ h1 {
   border: none; border-radius: 12px;
   font: 700 15px 'DM Sans', sans-serif; letter-spacing: 0.3px;
   cursor: pointer; margin-bottom: 6px;
+  touch-action: manipulation;
 }
 .learn-btn:active { transform: scale(.98); }
 .learn-btn.is-learned {
@@ -315,17 +319,32 @@ h1 {
   const GEO = JSON.parse(document.getElementById('geo-data').textContent);
   const STATES = JSON.parse(document.getElementById('state-data').textContent);
   const PREMARK = ['CA','NY','TX','FL'];
+  const STATUS_STORAGE_KEY = 'us-map-learner-status-v1';
+
+  const codes = Object.keys(GEO.paths);
+
+  const status = {}; // code -> 'known' | 'learned' | undefined
+  PREMARK.forEach(c => { status[c] = 'known'; });
+  try {
+    const raw = localStorage.getItem(STATUS_STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        for (const c of codes) {
+          const v = saved[c];
+          if (v === 'learned' || v === 'known') status[c] = v;
+        }
+      }
+    }
+  } catch (e) { /* ignore corrupt storage */ }
+  PREMARK.forEach(c => { status[c] = 'known'; });
 
   const svg = document.getElementById('map-svg');
   const NS = 'http://www.w3.org/2000/svg';
 
-  const status = {}; // code -> 'known' | 'learned' | undefined
-  PREMARK.forEach(c => { status[c] = 'known'; });
-
   // Build SVG
   const pathEls = {};
   const labelEls = {};
-  const codes = Object.keys(GEO.paths);
   for (const code of codes) {
     const g = GEO.paths[code];
     const p = document.createElementNS(NS, 'path');
@@ -366,6 +385,14 @@ h1 {
     const learned = codes.filter(c => status[c] === 'known' || status[c] === 'learned').length;
     document.getElementById('learned-count').textContent = learned;
     document.getElementById('progress-fill').style.width = (learned / 50 * 100) + '%';
+    try {
+      const out = {};
+      for (const c of codes) {
+        const v = status[c];
+        if (v === 'known' || v === 'learned') out[c] = v;
+      }
+      localStorage.setItem(STATUS_STORAGE_KEY, JSON.stringify(out));
+    } catch (e) { /* quota / private mode */ }
   }
   progressUpdate();
 
@@ -403,6 +430,9 @@ h1 {
   }
 
   mapWrap.addEventListener('pointerdown', (e) => {
+    // Only capture when dragging the map SVG. Capture on the sheet / quiz UI
+    // would retarget pointerup away from buttons and break clicks.
+    if (!e.target.closest('#map-svg')) return;
     mapWrap.setPointerCapture(e.pointerId);
     const p = pointerPos(e);
     pointers.set(e.pointerId, p);
@@ -486,6 +516,7 @@ h1 {
 
   // Double-tap to reset
   mapWrap.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('#map-svg')) return;
     const now = Date.now();
     if (now - lastTap < 300 && pointers.size === 1) {
       view = { x: 0, y: 0, k: 1 };
@@ -588,6 +619,32 @@ h1 {
   let sheetOpen = false;
   let sheetState = null;
 
+  sheetContent.addEventListener('click', (e) => {
+    const nChip = e.target.closest('[data-neighbor]');
+    if (nChip) {
+      openSheet(nChip.dataset.neighbor);
+      return;
+    }
+    if (!e.target.closest('.learn-btn')) return;
+    if (!sheetOpen || !sheetState) return;
+    const code = sheetState;
+    const s = STATES[code];
+    if (!s) return;
+    if (status[code] === 'known') {
+      showToast('Already in your "known" set', 'success');
+      return;
+    }
+    if (status[code] === 'learned') {
+      delete status[code];
+    } else {
+      status[code] = 'learned';
+      showToast(`${s.name} marked as learned`, 'success');
+    }
+    refreshState(code);
+    progressUpdate();
+    renderSheet(code);
+  });
+
   function fmtPop(n) {
     if (n >= 1e6) return (n/1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.?0+$/, '') + 'M';
     if (n >= 1e3) return (n/1e3).toFixed(0) + 'K';
@@ -600,7 +657,7 @@ h1 {
     const factsHtml = s.facts.map(f => `<div class="fact"><div class="fact-dot"></div><div>${f}</div></div>`).join('');
     const neighborsHtml = (s.neighbors || []).map(n => {
       const cls = status[n] === 'known' ? 'known' : (status[n] === 'learned' ? 'learned' : '');
-      return `<button class="neighbor-chip ${cls}" data-neighbor="${n}">${n}</button>`;
+      return `<button type="button" class="neighbor-chip ${cls}" data-neighbor="${n}">${n}</button>`;
     }).join('') || '<div style="font-size:13px;color:var(--text-faint)">No neighboring states</div>';
 
     sheetContent.innerHTML = `
@@ -617,28 +674,10 @@ h1 {
       <div class="facts">${factsHtml}</div>
       <div class="neighbors-title">Neighboring states</div>
       <div class="neighbors">${neighborsHtml}</div>
-      <button class="learn-btn ${learned ? 'is-learned' : ''}" id="learn-btn">
+      <button type="button" class="learn-btn ${learned ? 'is-learned' : ''}">
         ${learned ? '✓ Marked as learned' : 'Mark as learned'}
       </button>
     `;
-    document.getElementById('learn-btn').addEventListener('click', () => {
-      if (status[code] === 'known') {
-        showToast('Already in your "known" set', 'success');
-        return;
-      }
-      if (status[code] === 'learned') {
-        delete status[code];
-      } else {
-        status[code] = 'learned';
-        showToast(`${s.name} marked as learned`, 'success');
-      }
-      refreshState(code);
-      progressUpdate();
-      renderSheet(code);
-    });
-    sheetContent.querySelectorAll('[data-neighbor]').forEach(btn => {
-      btn.addEventListener('click', () => openSheet(btn.dataset.neighbor));
-    });
   }
 
   function openSheet(code) {
